@@ -108,6 +108,8 @@ public void OnMapStart()
 			
 		} while (kv.GotoNextKey());
 	}
+	
+	kv.Close();
 }
 
 //=========================[ Client Events ]=========================//
