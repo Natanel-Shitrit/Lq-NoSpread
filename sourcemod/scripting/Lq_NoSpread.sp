@@ -11,8 +11,8 @@ ConVar g_cvWeaponAccuracyNospread;
 
 enum
 {
-	NOSPREAD_OPTION_IGNORE = -1,
-	NOSPREAD_OPTION_FALSE,
+	NOSPREAD_OPTION_IGNORE = -1, 
+	NOSPREAD_OPTION_FALSE, 
 	NOSPREAD_OPTION_TRUE
 }
 
@@ -27,14 +27,14 @@ enum struct NoSpreadWeapon
 }
 ArrayList g_NoSpreadWeapons;
 
-int g_ClientNoSpreadWeaponIndex[MAXPLAYERS + 1] = {-1, ...};
+int g_ClientNoSpreadWeaponIndex[MAXPLAYERS + 1] =  { -1, ... };
 
 public Plugin myinfo = 
 {
 	name = "[Lq] NoSpread", 
 	author = "Natanel 'LuqS'", 
 	description = "Control Your NoSpread ;D", 
-	version = "1.1.0", 
+	version = "1.2.0", 
 	url = "https://steamcommunity.com/id/luqsgood || Discord: LuqS#6505"
 };
 
@@ -56,6 +56,9 @@ public void OnPluginStart()
 	{
 		SetFailState("'weapon_accuracy_nospread' ConVar couldn't be found.");
 	}
+	
+	//========================[ Events ]==========================//
+	HookEvent("weapon_fire", Event_OnWeaponFire, EventHookMode_Pre);
 	
 	//=======================[ Late-Load ]========================//
 	for (int current_client = 1; current_client <= MaxClients; current_client++)
@@ -94,7 +97,7 @@ public void OnMapStart()
 			kv.GetSectionName(weapon.weapon_classname, sizeof(NoSpreadWeapon::weapon_classname));
 			
 			weapon.nospread_option_mid_air = kv.GetNum("mid-air", NOSPREAD_OPTION_IGNORE);
-			weapon.nospread_option_scoped  = kv.GetNum("scoped"	, NOSPREAD_OPTION_IGNORE);
+			weapon.nospread_option_scoped = kv.GetNum("scoped", NOSPREAD_OPTION_IGNORE);
 			
 			weapon.velocity_range[0] = kv.GetNum("velocity_min", -1);
 			weapon.velocity_range[1] = kv.GetNum("velocity_max", -1);
@@ -111,50 +114,77 @@ public void OnMapStart()
 
 public void OnClientPutInServer(int client)
 {
+	g_ClientNoSpreadWeaponIndex[client] = -1;
 	SDKHook(client, SDKHook_WeaponSwitch, OnWeaponSwitch);
 }
 
 public Action OnWeaponSwitch(int client, int weapon)
 {
-	SDKUnhook(client, SDKHook_PostThinkPost, OnPostThinkPost);
-	
-	char weapon_classname[64];
-	GetEntityClassname(weapon, weapon_classname, sizeof(weapon_classname));
-	
-	if((g_ClientNoSpreadWeaponIndex[client] = g_NoSpreadWeapons.FindString(weapon_classname)) != -1)
+	if (!IsFakeClient(client))
 	{
-		SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
-	}
-	else
-	{
-		g_cvWeaponAccuracyNospread.ReplicateToClient(client, g_cvWeaponAccuracyNospread.BoolValue ? "1" : "0");
+		SDKUnhook(client, SDKHook_PostThinkPost, OnPostThinkPost);
+		
+		char weapon_classname[64];
+		GetEntityClassname(weapon, weapon_classname, sizeof(weapon_classname));
+		
+		if ((g_ClientNoSpreadWeaponIndex[client] = g_NoSpreadWeapons.FindString(weapon_classname)) != -1)
+		{
+			SDKHook(client, SDKHook_PostThinkPost, OnPostThinkPost);
+		}
+		else
+		{
+			g_cvWeaponAccuracyNospread.ReplicateToClient(client, g_cvWeaponAccuracyNospread.BoolValue ? "1" : "0");
+		}
 	}
 }
 
 public void OnPostThinkPost(int client)
 {
-	bool applay_nospread = true;
+	g_cvWeaponAccuracyNospread.ReplicateToClient(client, ClientShouldGetNoSpread(client) ? "1" : "0");
+}
+
+public void Event_OnWeaponFire(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
+	
+	if (0 < client <= MaxClients && g_ClientNoSpreadWeaponIndex[client] != -1 && ClientShouldGetNoSpread(client))
+	{
+		g_cvWeaponAccuracyNospread.BoolValue = true;
+		RequestFrame(DisableNoSpread);
+	}
+}
+
+bool ClientShouldGetNoSpread(int client)
+{
+	bool apply_nospread = true;
 	
 	NoSpreadWeapon weapon; weapon = GetNoSpreadWeaponByIndex(g_ClientNoSpreadWeaponIndex[client]);
 	
 	if (weapon.nospread_option_scoped != NOSPREAD_OPTION_IGNORE)
 	{
-		applay_nospread &= weapon.nospread_option_scoped == GetEntProp(client, Prop_Send, "m_bIsScoped");
+		apply_nospread &= weapon.nospread_option_scoped == GetEntProp(client, Prop_Send, "m_bIsScoped");
 	}
 	
 	if (weapon.nospread_option_mid_air != NOSPREAD_OPTION_IGNORE)
 	{
-		applay_nospread &= view_as<bool>(weapon.nospread_option_mid_air) == !(GetEntityFlags(client) & FL_ONGROUND);
+		apply_nospread &= view_as<bool>(weapon.nospread_option_mid_air) == !(GetEntityFlags(client) & FL_ONGROUND);
 	}
 	
 	if (weapon.velocity_range[0] != -1 || weapon.velocity_range[1] != -1)
 	{
 		float client_velocity = GetClientVelocity(client);
-		applay_nospread &= (weapon.velocity_range[0] != -1 && client_velocity >= weapon.velocity_range[0])
-						&& (weapon.velocity_range[1] != -1 && client_velocity <= weapon.velocity_range[1]);
+		apply_nospread 	&= (weapon.velocity_range[0] != -1 && client_velocity >= weapon.velocity_range[0])
+		 				&& (weapon.velocity_range[1] != -1 && client_velocity <= weapon.velocity_range[1]);
 	}
 	
-	g_cvWeaponAccuracyNospread.ReplicateToClient(client, applay_nospread ? "1" : "0");
+	return apply_nospread;
+}
+
+//=========================[ Other ]=========================//
+
+void DisableNoSpread()
+{
+	g_cvWeaponAccuracyNospread.BoolValue = false;
 }
 
 float GetClientVelocity(int client)
@@ -170,4 +200,4 @@ any[] GetNoSpreadWeaponByIndex(int index)
 	g_NoSpreadWeapons.GetArray(index, weapon, sizeof(weapon));
 	
 	return weapon;
-}
+} 
